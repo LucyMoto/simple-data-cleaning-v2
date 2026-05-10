@@ -1,6 +1,6 @@
 # LangGraph Workflow Example
 
-A simple example demonstrating how to build workflows with LangGraph for data processing.
+A simple example demonstrating how to build workflows with LangGraph for intelligent data cleaning using agentic decision-making.
 
 ## How It Works
 
@@ -11,13 +11,28 @@ The workflow follows these steps:
    - Statistical description (`.describe()`)
    - Dataset info (`.info()`)
    - Explicit missing value counts
-3. **LLM Reasoning** - Uses GPT-4o-mini to analyze the summary and decide which action to take
-4. **Conditional Routing** - Routes to appropriate cleaning node based on LLM decision
-5. **Data Cleaning** - Can execute:
+   - Outlier detection using IQR method
+3. **LLM Reasoning** - Uses GPT-4o-mini to analyze the data summary and intelligently decide which action is most appropriate:
+   - clean_missing - Fill missing values with column means
+   - remove_outliers - Remove values outside IQR bounds
+   - both - Execute both cleaning steps
+   - none - No action needed (data is already clean)
+4. **Conditional Routing** - Router function directs flow to the appropriate node based on LLM's decision
+5. **Data Cleaning** (if needed) - Can execute:
    - **Handle Missing Values** - Fills numeric missing values with column means
-   - **Remove Outliers** - Removes outliers using IQR (Interquartile Range) method
-6. **Describe Data** - Generates statistical summary of cleaned data
+   - **Remove Outliers** - Removes values outside IQR bounds (Q1 - 1.5×IQR, Q3 + 1.5×IQR)
+   - **Both** - Executes missing value handling first, then outlier removal
+6. **Describe Data** - Generates a statistical summary of the cleaned (or original) data
 7. **Output Results** - Prints the action taken and final summary
+
+## Key Features
+
+- Intelligent Decision Making: The LLM analyzes data quality issues and decides whether cleaning is necessary
+- Outlier Detection: Automatically detects and counts outliers using the industry-standard IQR method
+- Conditional Workflow Routing: Dynamically routes to different processing paths based on LLM decision
+- Type-Safe State Management: Uses TypedDict for strongly-typed workflow state
+- Graph Visualization: Generates a Mermaid diagram of the workflow
+
 
 ## Setup
 
@@ -74,9 +89,10 @@ poetry run python workflows/simple_clean_data_workflow.py
 The workflow will:
 1. Save a workflow graph visualization to `outputs/workflow_graph.png`
 2. Load data from `data/missing.csv` (you can change this in the script)
-3. Use an LLM to analyze the data and decide which cleaning action to take
-4. Execute the appropriate cleaning steps
-5. Display the results
+3. Analyze the data for missing values and outliers. 
+4. Use an LLM to decide which cleaning action to take
+5. Execute the appropriate cleaning steps (or skip if data is clean)
+6. Display the results
 
 ## Project Structure
 
@@ -103,3 +119,23 @@ The workflow will:
 - `data/` - Sample CSV files with different data quality issues
 - `workflows/` - LangGraph workflow scripts
 - `outputs/` - Generated outputs (visualizations, reports)
+
+## Workflow Architecture
+
+**State Definition**
+python
+class DataState(TypedDict):
+    csv_path: str          # Path to input CSV
+    df: pd.DataFrame       # The data being processed
+    action: Literal[...]   # LLM's chosen action (clean_missing, remove_outliers, both, none)
+    summary: str           # Text summary of data analysis
+
+**Router Function**
+The route_action() function maps LLM decisions to workflow nodes:
+
+- "clean_missing" → handle_missing_values node
+- "remove_outliers" → remove_outliers node
+- "both" → both node (handles both issues)
+- "none" → describe_data node (skip cleaning)
+
+All paths eventually converge to describe_data → output_results → END
