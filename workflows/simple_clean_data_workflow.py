@@ -5,6 +5,7 @@ from langgraph.graph import StateGraph, START, END
 from dotenv import load_dotenv
 from pathlib import Path
 import io
+from typing import cast
 
 # Load environment variables from .env file
 load_dotenv()
@@ -81,14 +82,14 @@ def reasoning_node(state: DataState) -> DataState:
     prompt = (
         "You are a data science assistant."
         "Given this dataset summary, decide which single action is most appropriate: "
-        "'clean_missing', 'remove_outliers', or 'both'.\n\n"
+        "'clean_missing', 'remove_outliers', 'both' or 'none'.\n\n"
         f"{state['summary']}\n\n"
-        "Respond only with one of: clean_missing, remove_outliers, both."
+        "Respond only with one of: clean_missing, remove_outliers, both, none."
     )
-    decision = llm.invoke(prompt).content.strip().lower()
-    if decision not in ["clean_missing", "remove_outliers", "both"]:
+    decision = str(llm.invoke(prompt).content).strip().lower()
+    if decision not in ["clean_missing", "remove_outliers", "both", "none"]:
         decision = "none"
-    state["action"] = decision
+    state["action"] = cast(Literal["clean_missing", "remove_outliers", "both", "none"], decision)
     return state
 
 
@@ -221,7 +222,7 @@ if __name__ == "__main__":
     csv_path = str(PROJECT_ROOT / "data" / "outliers.csv")
     init_state: DataState = {
         "csv_path": csv_path,
-        "df": None,
+        "df": pd.DataFrame(),
         "action": "none",
         "summary": "",
     }
