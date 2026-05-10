@@ -19,7 +19,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 class DataState(TypedDict):
     csv_path: str
     df: pd.DataFrame
-    action: Literal["clean_missing", "remove_outliers", "both"]
+    action: Literal["clean_missing", "remove_outliers", "both", "none"]
     summary: str
 
 
@@ -59,14 +59,27 @@ def summarize_data(state: DataState) -> DataState:
     missing_counts = state["df"].isnull().sum()
     parts.append(missing_counts.to_string())
     
+    # 4. Explicit outliers detection
+    parts.append("\n\nOUTLIERS (IQR Method):\n")
+    outlier_summary = []
+    for col in state["df"].select_dtypes(include=['number']).columns:
+        Q1 = state["df"][col].quantile(0.25)
+        Q3 = state["df"][col].quantile(0.75)
+        IQR = Q3 - Q1
+        lower = Q1 - 1.5 * IQR
+        upper = Q3 + 1.5 * IQR
+        outliers = ((state["df"][col] < lower) | (state["df"][col] > upper)).sum()
+        outlier_summary.append(f"{col}: {outliers} outliers")
+    parts.append("\n".join(outlier_summary))
+    
     state["summary"] = "\n".join(parts)
     return state
 
 
 def reasoning_node(state: DataState) -> DataState:
-    """Use LLM to decide whether to clean missing values or remove outliers."""
+    """Use LLM to decide whether to clean missing values or remove outliers or both."""
     prompt = (
-        "You are a data science assistant. "
+        "You are a data science assistant."
         "Given this dataset summary, decide which single action is most appropriate: "
         "'clean_missing', 'remove_outliers', or 'both'.\n\n"
         f"{state['summary']}\n\n"
@@ -104,6 +117,23 @@ def remove_outliers(state: DataState) -> DataState:
     state["df"] = df
     return state
 
+def both(state: DataState) -> DataState:
+    """Remove missing values and outliers using IQR method."""
+    df = state["df"].copy()
+    numeric_cols = df.select_dtypes(include="number").columns
+    
+    for col in numeric_cols:
+        df[col] = df[col].fillna(df[col].mean())
+        Q1 = df[col].quantile(0.25)
+        Q3 = df[col].quantile(0.75)
+        IQR = Q3 - Q1
+        lower_bound = Q1 - 1.5 * IQR
+        upper_bound = Q3 + 1.5 * IQR
+        df = df[(df[col] >= lower_bound) & (df[col] <= upper_bound)]
+    
+    state["df"] = df
+    return state
+
 
 def describe_data(state: DataState) -> DataState:
     """Describe numeric columns after any cleaning."""
@@ -125,7 +155,8 @@ def route_action(state: DataState) -> str:
     mapping = {
         "clean_missing": "handle_missing_values",
         "remove_outliers": "remove_outliers",
-        "none": "describe_data",
+        "both": "both",
+        "describe_data": "describe_data"
     }
     return mapping.get(state["action"], "describe_data")
 
@@ -141,6 +172,7 @@ workflow.add_node("summarize_data", summarize_data)
 workflow.add_node("reasoning_node", reasoning_node)
 workflow.add_node("handle_missing_values", handle_missing_values)
 workflow.add_node("remove_outliers", remove_outliers)
+workflow.add_node("both", both)
 workflow.add_node("describe_data", describe_data)
 workflow.add_node("output_results", output_results)
 
@@ -150,10 +182,12 @@ workflow.add_edge("summarize_data", "reasoning_node")
 workflow.add_conditional_edges("reasoning_node", route_action, {
     "handle_missing_values": "handle_missing_values",
     "remove_outliers": "remove_outliers",
-    "describe_data": "describe_data",
+    "both": "both",
+    "describe_data" : "describe_data"
 })
 workflow.add_edge("handle_missing_values", "describe_data")
 workflow.add_edge("remove_outliers", "describe_data")
+workflow.add_edge("both", "describe_data")
 workflow.add_edge("describe_data", "output_results")
 workflow.add_edge("output_results", END)
 
@@ -184,7 +218,7 @@ if __name__ == "__main__":
     save_graph_visualization()
     
     # Run the workflow
-    csv_path = str(PROJECT_ROOT / "data" / "missing.csv")
+    csv_path = str(PROJECT_ROOT / "data" / "outliers.csv")
     init_state: DataState = {
         "csv_path": csv_path,
         "df": None,
